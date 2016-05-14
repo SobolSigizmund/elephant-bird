@@ -1,39 +1,73 @@
-language: java
-
+addons: {}
+after_success:
+- export JAVA_TOOL_OPTIONS=-javaagent:$DFB_PROJECT_DIR/jacoco-agent-jdk8.jar=destfile=$DFB_PROJECT_DIR/jacoco.exec
+- mvn test -Djacoco.skip=true -Dcobertura.skip=true -Dmaven.clover.skip=true test
+  -Dtest.library.path=$PWD/hadoop-lzo-native/lib -Drequire.lzo.tests=true $HADOOP_PROFILE
+  $THRIFT_PROFILE
+- ./df-build.sh
+- env > env.file
+- curl -sL https://raw.githubusercontent.com/travis-ci/artifacts/master/install |
+  bash
+- artifacts upload --key $AWS_ACCESS_KEY_ID --secret $AWS_SECRET_ACCESS_KEY --bucket
+  $DFB_AWS_BUCKET --target-paths $DFB_AWS_BUILD_PATH $(git ls-files -oi -x *.exec)
+- artifacts upload --key $AWS_ACCESS_KEY_ID --secret $AWS_SECRET_ACCESS_KEY --bucket
+  $DFB_AWS_BUCKET --target-paths $DFB_AWS_BUILD_PATH ${DFB_PROJECT_DIR}/env.file
 before_install:
-# An attempt to fix the buffer overflow in the pig tests
-# /usr/lib/jvm/java-7-openjdk-amd64/jre/lib/amd64/libnet.so(Java_java_net_Inet4AddressImpl_getLocalHostName+0x190)[
-# https://github.com/travis-ci/travis-ci/issues/1484
-  - echo "127.0.0.1 " `hostname` | sudo tee /etc/hosts
-  - sudo apt-get update -qq
-  - sudo apt-get install -qq protobuf-compiler
-  - sudo apt-get install -qq libboost-dev libboost-test-dev libboost-program-options-dev libevent-dev automake libtool flex bison pkg-config g++ libssl-dev
-  - git clone https://git-wip-us.apache.org/repos/asf/thrift.git
-  - cd thrift
-  - git checkout $THRIFT_TAG
-  - ./bootstrap.sh
-  - ./configure --disable-gen-erl --disable-gen-hs --without-ruby --without-haskell --without-erlang
-  - sudo make install
-  - cd ..
-  - sudo apt-get -qq install lzop liblzo2-dev # libzo2-dev for compiling hadoop-lzo
-  - git clone git://github.com/twitter/hadoop-lzo.git # for native libgplcompression
-  - cd hadoop-lzo
-  - git checkout master
-  - mvn compile
-  - mv target/native/Linux-* ../hadoop-lzo-native
-  - cd ..
-
-install: true
-
+- echo "127.0.0.1 " `hostname` | sudo tee /etc/hosts
+- sudo apt-get update -qq
+- sudo apt-get install -qq protobuf-compiler
+- sudo apt-get install -qq libboost-dev libboost-test-dev libboost-program-options-dev
+  libevent-dev automake libtool flex bison pkg-config g++ libssl-dev
+- git clone https://git-wip-us.apache.org/repos/asf/thrift.git
+- cd thrift
+- git checkout $THRIFT_TAG
+- ./bootstrap.sh
+- ./configure --disable-gen-erl --disable-gen-hs --without-ruby --without-haskell
+  --without-erlang
+- sudo make install
+- cd ..
+- sudo apt-get -qq install lzop liblzo2-dev
+- git clone git://github.com/twitter/hadoop-lzo.git
+- cd hadoop-lzo
+- git checkout master
+- mvn compile
+- mv target/native/Linux-* ../hadoop-lzo-native
+- cd ..
+- wget -O beforebuild.sh $DFB_AGENTS_URL/beforebuild.sh
+- chmod a+x beforebuild.sh
+- ./beforebuild.sh
+env:
+  global:
+  - DFB_PROJECT_DIR=$(pwd)
+  - TMP_PROJECT_PARENT_DIR=$(dirname $DFB_PROJECT_DIR)
+  - DFB_BUILD_ID=$TRAVIS_BUILD_ID
+  - DFB_PRODUCT_NAME=$(basename $DFB_PROJECT_DIR)
+  - DFB_OWNER_NAME=$(basename $TMP_PROJECT_PARENT_DIR)
+  - DFB_PRODUCT_KEY=${DFB_OWNER_NAME}_${DFB_PRODUCT_NAME}
+  - DFB_AWS_BUCKET=aline-external-ci-artifacts
+  - DFB_AGENTS_URL=https://s3.amazonaws.com/${DFB_AWS_BUCKET}/agents
+  - DFB_PACKAGING_URL=s3://${DFB_AWS_BUCKET}/artifacts/travis/
+  - DFB_AWS_BUILD_PATH=/artifacts/travis/${DFB_PRODUCT_KEY}/${DFB_BUILD_ID}/output/
+  - AWS_ACCESS_KEY_ID=AKIAIIU2LBOCCKXAIFZQ
+  - AWS_SECRET_ACCESS_KEY=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
+  - DFB_JTO=-javaagent:${DFB_PROJECT_DIR}/dfbuild-agent.jar=PACKAGING_BASE_URI=$DFB_PACKAGING_URL,PRODUCT_KEY=$DFB_PRODUCT_KEY/,BUILD_KEY=$DFB_BUILD_ID/,MODULES_KEY=modules/,START_TIME=0,BUILD_BASE_DIR=$DFB_PROJECT_DIR
+install: 'true'
+jdk:
+- oraclejdk8
+language: java
 matrix:
   include:
-    - jdk: openjdk7
-      env: THRIFT_TAG=0.7.0 THRIFT_PROFILE=-Pthrift7
-    - jdk: openjdk7
-      env: THRIFT_TAG=0.7.0 THRIFT_PROFILE=-Pthrift7 HADOOP_PROFILE=-Phadoop2
-    - jdk: openjdk7
-      env: THRIFT_TAG=0.9.1 THRIFT_PROFILE=-Pthrift9
-    - jdk: openjdk7
-      env: THRIFT_TAG=0.9.1 THRIFT_PROFILE=-Pthrift9 HADOOP_PROFILE=-Phadoop2
-
-script: "mvn test -Dtest.library.path=$PWD/hadoop-lzo-native/lib -Drequire.lzo.tests=true $HADOOP_PROFILE $THRIFT_PROFILE"
+  - env: THRIFT_TAG=0.7.0 THRIFT_PROFILE=-Pthrift7
+    jdk: openjdk7
+  - env: THRIFT_TAG=0.7.0 THRIFT_PROFILE=-Pthrift7 HADOOP_PROFILE=-Phadoop2
+    jdk: openjdk7
+  - env: THRIFT_TAG=0.9.1 THRIFT_PROFILE=-Pthrift9
+    jdk: openjdk7
+  - env: THRIFT_TAG=0.9.1 THRIFT_PROFILE=-Pthrift9 HADOOP_PROFILE=-Phadoop2
+    jdk: openjdk7
+notifications: {}
+script:
+- export JAVA_TOOL_OPTIONS=$DFB_JTO
+- mvn -Djacoco.skip=true -Dcobertura.skip=true -Dmaven.clover.skip=true test -Dtest.library.path=$PWD/hadoop-lzo-native/lib
+  -Drequire.lzo.tests=true $HADOOP_PROFILE $THRIFT_PROFILE
+# Modified by IntegrationTestInstrumentation at 2016-05-14 07:13:14.432071
